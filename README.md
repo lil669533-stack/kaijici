@@ -18,7 +18,13 @@
 /usr/bin/ruby -rwebrick -e 'puts WEBrick::VERSION'
 ```
 
-下载并解压项目，在项目文件夹里双击 `start.command`。它会将程序安装到 `~/Applications/开机词`，启动本地服务并打开学习窗口。有 Google Chrome 时优先使用 Chrome 窗口，否则使用默认浏览器。
+下载并解压项目，先在终端进入项目文件夹并运行以下命令，允许脚本直接打开：
+
+```bash
+chmod +x *.command tools/*.command
+```
+
+然后双击 `start.command`。它会将程序安装到 `~/Applications/开机词`，启动本地服务并打开学习窗口。有 Google Chrome 时优先使用 Chrome 窗口，否则使用默认浏览器。
 
 也可以在终端进入项目文件夹后运行：
 
