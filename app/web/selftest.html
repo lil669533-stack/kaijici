@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>核心逻辑自测</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; padding: 30px; background: #f6f3ec; color: #221f1a; }
+  h1 { font-size: 18px; }
+  .ok { color: #2f6b56; }
+  .fail { color: #b04a3c; font-weight: 600; }
+  li { margin: 2px 0; }
+  code { background: #efe9dd; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>核心逻辑自测</h1>
+<ul id="out"></ul>
+<script src="core.js"></script>
+<script>
+(function () {
+  var C = window.Core, out = document.getElementById('out'), pass = 0, fail = 0;
+  function t(name, fn) {
+    var li = document.createElement('li');
+    try {
+      var r = fn();
+      if (r === true) { pass++; li.className = 'ok'; li.textContent = '✓ ' + name; }
+      else { fail++; li.className = 'fail'; li.textContent = '✗ ' + name + ' — ' + r; }
+    } catch (e) {
+      fail++; li.className = 'fail'; li.textContent = '✗ ' + name + ' — ' + e.message;
+    }
+    out.appendChild(li);
+  }
+
+  var today = C.todayKey();
+
+  t('日期加减跨月', function () {
+    return C.addDays('2026-01-31', 1) === '2026-02-01' && C.addDays('2026-03-01', -1) === '2026-02-28';
+  });
+
+  t('解析：空格 / Tab / 序号 / 音标', function () {
+    var txt = [
+      'abandon 放弃',
+      '1. ability\t能力',
+      'absorb /əbˈzɔːb/ 吸收',
+      'account,账户',
+      'duplicate 重复',
+      'duplicate 重复的词'
+    ].join('\n');
+    var r = C.parseWordList(txt, 20);
+    if (r.count !== 5) return '应识别 5 个，实际 ' + r.count;
+    if (r.words[2].ipa !== '/əbˈzɔːb/') return '音标没抽出来：' + JSON.stringify(r.words[2]);
+    return true;
+  });
+
+  t('解析：# 标题分组', function () {
+    var txt = '# 职场\nresume 简历\ninterview 面试\n# 环境\npollution 污染\n';
+    var r = C.parseWordList(txt, 20);
+    if (r.groups.length !== 2) return '应有 2 组，实际 ' + r.groups.length;
+    if (r.groups[0].title !== '职场') return '组名错：' + r.groups[0].title;
+    return true;
+  });
+
+  t('自动分组：每组不超过 20，词数守恒', function () {
+    var words = [];
+    var pool = 'resume interview salary contract colleague promotion recruit vacancy employer employee bonus overtime deadline apply candidate reference negotiate probation internship qualification'.split(' ');
+    pool.forEach(function (w) { words.push(w + ' 职场相关'); });
+    'pollution recycle emission sustainable carbon drought habitat extinct solar irrigation'.split(' ').forEach(function (w) { words.push(w + ' 环保相关'); });
+    var text = words.join('\n');
+    var r = C.parseWordList(text, 20);
+    var total = r.groups.reduce(function (s, g) { return s + g.words.length; }, 0);
+    if (total !== r.count) return '分组后词数 ' + total + ' ≠ ' + r.count;
+    var over = r.groups.filter(function (g) { return g.words.length > 20; });
+    if (over.length) return '有组超过 20 词';
+    return true;
+  });
+
+  t('自动分组：同场景的词会落在一起', function () {
+    var text = 'resume 简历\ninterview 面试\nsalary 薪水\npollution 污染\nrecycle 回收\n';
+    var r = C.parseWordList(text, 20);
+    var flat = r.groups[0].words.map(function (x) { return x.w; });
+    if (flat.indexOf('resume') === -1 || flat.indexOf('interview') === -1) return '职场词没归到一组：' + flat.join(',');
+    return true;
+  });
+
+  t('复习：陌生词 → 1 天后', function () {
+    var r = C.review(C.blankRec(), 'good', today);
+    return r.interval === 1 && r.due === C.addDays(today, 1);
+  });
+
+  t('复习：认识 → 间隔变长，再认识继续放大', function () {
+    var r = C.review(C.blankRec(), 'good', today);
+    var d2 = C.addDays(today, 1);
+    r = C.review(r, 'good', d2);
+    if (r.interval < 2) return '第二次间隔应 ≥2，实际 ' + r.interval;
+    var d3 = C.addDays(d2, r.interval);
+    var r2 = C.review(r, 'good', d3);
+    if (r2.interval <= r.interval) return '间隔没有增长';
+    return true;
+  });
+
+  t('复习：不认识 → 今天再来，且难度下调', function () {
+    var r = C.review(C.blankRec(), 'good', today);
+    var before = r.ease;
+    r = C.review(r, 'again', today);
+    if (r.due !== today) return 'again 应今天到期';
+    if (!(r.ease < before)) return 'ease 应下降';
+    return true;
+  });
+
+  t('复习：模糊 → 间隔收缩', function () {
+    var r = { ease: 2.5, interval: 10, due: C.addDays(today, 10), reps: 3, lapses: 0, seen: 5, last: null, lastGrade: 'good' };
+    var r2 = C.review(r, 'hard', today);
+    return r2.interval === 6 ? true : '应为 6，实际 ' + r2.interval;
+  });
+
+  t('每日计划：新词不超过每天上限', function () {
+    var deck = {
+      meta: { perGroup: 20 },
+      groups: [{ id: 'g1', title: '组', words: Array.from({ length: 20 }, function (_, i) { return { w: 'w' + i, cn: '词' + i }; }) }]
+    };
+    var p = C.planFor(deck, {}, {}, today, { perDay: 20, reviewLimit: 40 });
+    if (p.fresh.length !== 20) return '应给 20 个新词，实际 ' + p.fresh.length;
+    var done = {};
+    done[today] = { newDone: 20, reviewDone: 0 };
+    var p2 = C.planFor(deck, {}, done, today, { perDay: 20, reviewLimit: 40 });
+    return p2.fresh.length === 0 ? true : '学满后不该再给新词，实际 ' + p2.fresh.length;
+  });
+
+  t('每日计划：到期的词进入复习队列', function () {
+    var deck = { meta: {}, groups: [{ id: 'g1', title: 'g', words: [{ w: 'alpha', cn: '甲' }, { w: 'beta', cn: '乙' }] }] };
+    var prog = {
+      alpha: Object.assign(C.blankRec(), { seen: 3, due: C.addDays(today, -1), interval: 3, last: C.addDays(today, -4) }),
+      beta: Object.assign(C.blankRec(), { seen: 1, due: C.addDays(today, 5), interval: 5, last: today })
+    };
+    var p = C.planFor(deck, prog, {}, today, {});
+    if (p.review.length !== 1 || p.review[0].w !== 'alpha') return '复习队列错：' + JSON.stringify(p.review.map(function (x) { return x.w; }));
+    return true;
+  });
+
+  t('连续天数：中断即清零', function () {
+    var days = {};
+    days[C.addDays(today, -2)] = { newDone: 20 };
+    days[C.addDays(today, -1)] = { newDone: 20 };
+    days[today] = { newDone: 5 };
+    if (C.streak(days, today) !== 3) return '应连续 3 天，实际 ' + C.streak(days, today);
+    delete days[today];
+    if (C.streak(days, today) !== 2) return '今天未学应仍显示昨天起的连续 2 天，实际 ' + C.streak(days, today);
+    days[C.addDays(today, -1)] = {};
+    if (C.streak(days, today) !== 0) return '断档应归零';
+    return true;
+  });
+
+  t('掌握度统计', function () {
+    var deck = { groups: [{ id: 'g', title: 'g', words: [{ w: 'a' }, { w: 'b' }, { w: 'c' }] }] };
+    var prog = {
+      a: Object.assign(C.blankRec(), { seen: 5, interval: 30 }),
+      b: Object.assign(C.blankRec(), { seen: 2, interval: 3 })
+    };
+    var m = C.mastery(deck, prog);
+    return m.mastered === 1 && m.learning === 1 && m.new === 1 ? true : JSON.stringify(m);
+  });
+
+  t('词根提示：inspect → spect', function () {
+    var r = C.explain('inspect');
+    if (!r || r.root !== 'spect') return '没识别出 spect：' + JSON.stringify(r);
+    if (r.prefix !== 'in') return '前缀应为 in，实际 ' + r.prefix;
+    return true;
+  });
+
+  t('词根提示：无词根的词返回空', function () {
+    return C.explain('zebra') === null ? true : 'zebra 不该有词根';
+  });
+
+  t('HTML 转义', function () {
+    return C.escapeHtml('<b>"x"&</b>') === '&lt;b&gt;&quot;x&quot;&amp;&lt;/b&gt;';
+  });
+
+  var sum = document.createElement('p');
+  sum.innerHTML = '<b class="' + (fail ? 'fail' : 'ok') + '">' + pass + ' 通过 / ' + fail + ' 失败</b>';
+  document.body.appendChild(sum);
+  document.title = (fail ? 'FAIL ' : 'PASS ') + pass + '/' + (pass + fail);
+})();
+</script>
+</body>
+</html>
