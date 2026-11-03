@@ -1,0 +1,23 @@
+# 本地学习数据与第三方词库，仅保留示例词库
+/data/*
+!/data/deck.json
+
+# 运行状态、浏览器资料与日志
+/log/
+/.port
+/.last-open
+/.chrome-profile/
+*.log
+*.tmp
+
+# 系统文件与本地配置
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# 凭据和私钥
+*.pem
+*.key
+id_rsa
+id_ed25519
